@@ -12,7 +12,7 @@ fn extract_number(input: &str) -> Result<u32> {
     digits.parse::<u32>().map_err(|_| anyhow!("error"))
 }
 
-fn create_map() -> HashMap<&'static str, u32> {
+fn _create_map() -> HashMap<&'static str, u32> {
     let mut map = HashMap::new();
     map.insert("red", 12);
     map.insert("green", 13);
@@ -20,14 +20,11 @@ fn create_map() -> HashMap<&'static str, u32> {
     map
 }
 
-fn process_line(line: &str, map: &HashMap<&str, u32>) -> Result<u32> {
+fn _process_line1(line: &str, map: &HashMap<&str, u32>) -> Result<u32> {
     let space_index = line.find(' ').ok_or_else(|| anyhow!("error"))?;
     let colon_index = line.find(':').ok_or_else(|| anyhow!("error"))?;
     let game_number = extract_number(&line[space_index + 1..colon_index])?;
     let rest = &line[colon_index + 2..];
-
-    // println!("game_number: {}", game_number);
-    // println!("rest: {}", rest);
 
     for part in rest.split("; ") {
         // println!("part: {}", part);
@@ -48,16 +45,43 @@ fn process_line(line: &str, map: &HashMap<&str, u32>) -> Result<u32> {
 
     Ok(game_number)
 }
+fn process_line2(line: &str) -> Result<u32> {
+    // let space_index = line.find(' ').ok_or_else(|| anyhow!("error"))?;
+    let colon_index = line.find(':').ok_or_else(|| anyhow!("error"))?;
+    // let game_number = extract_number(&line[space_index + 1..colon_index])?;
+    let rest = &line[colon_index + 2..];
+
+    let mut max_red = 0;
+    let mut max_green = 0;
+    let mut max_blue = 0;
+
+    for part in rest.split("; ") {
+        for word in part.split(", ") {
+            let space_index = word.find(' ').ok_or_else(|| anyhow!("error"))?;
+            let number = extract_number(&word[..space_index])?;
+            let color = &word[space_index + 1..];
+            if color == "red" && number > max_red {
+                max_red = number;
+            } else if color == "green" && number > max_green {
+                max_green = number;
+            } else if color == "blue" && number > max_blue {
+                max_blue = number;
+            }
+        }
+    }
+    Ok(max_blue * max_green * max_red)
+}
 
 fn main() -> Result<(), io::Error> {
     let file = File::open("src/input.txt")?;
     let reader = BufReader::new(file);
-    let map = create_map();
+    // let map = create_map1();
 
     let mut sum = 0;
 
     for line in reader.lines() {
-        sum += process_line(&line?, &map).unwrap_or(0);
+        let val = process_line2(&line?).unwrap_or(0);
+        sum += val;
     }
     println!("sum: {}", sum);
 
