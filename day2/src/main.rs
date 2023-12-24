@@ -73,7 +73,7 @@ fn process_line2(line: &str) -> Result<u32> {
 }
 
 fn main() -> Result<(), io::Error> {
-    let file = File::open("src/input.txt")?;
+    let file = File::open("day2/src/input.txt")?;
     let reader = BufReader::new(file);
     // let map = create_map1();
 

@@ -85,7 +85,7 @@ fn reverse_string(s: &str) -> String {
 }
 
 fn main() -> Result<(), io::Error> {
-    let file = File::open("src/input.txt")?;
+    let file = File::open("day1/src/input.txt")?;
     let reader = BufReader::new(file);
 
     let map = create_map();
