@@ -1,9 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::process::Output;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 struct Node {
@@ -65,74 +62,60 @@ impl Debug for Node {
     }
 }
 
-fn main() -> Result<()> {
-    let file = File::open("day10/src/input.txt")?;
-    let reader = BufReader::new(file);
-    let mut neighbors: HashMap<Node, Vec<Node>> = HashMap::new();
-
-    let mut start_node: Option<Node> = None;
-    let mut width: i32 = 0;
-    let mut height: i32 = 0;
-
-    let input_string = std::fs::read_to_string("day10/src/input.txt")?;
-    let width = input_string.lines().next().unwrap().len();
-    let height = input_string.lines().count();
+fn double_maze(input_string: String, width: usize, height: usize) -> Vec<Vec<char>> {
     let new_line: Vec<char> = vec!['.'; width * 2];
-    let mut new_input: Vec<Vec<char>> = vec![new_line; height * 2];
+    let mut out: Vec<Vec<char>> = vec![new_line; height * 2];
     for (y, line) in input_string.lines().enumerate() {
         for (x, char) in line.chars().enumerate() {
-            new_input[2 * y][2 * x] = char;
+            out[2 * y][2 * x] = char;
 
             match char {
                 '|' => {
-                    new_input[2 * y + 1][2 * x] = '|';
+                    out[2 * y + 1][2 * x] = '|';
                     if y > 0 {
-                        new_input[2 * y - 1][2 * x] = '|';
+                        out[2 * y - 1][2 * x] = '|';
                     }
                 }
                 '-' => {
-                    new_input[2 * y][2 * x + 1] = '-';
+                    out[2 * y][2 * x + 1] = '-';
                     if x > 0 {
-                        new_input[2 * y][2 * x - 1] = '-';
+                        out[2 * y][2 * x - 1] = '-';
                     }
                 }
                 'L' => {
-                    new_input[2 * y][2 * x + 1] = '-';
+                    out[2 * y][2 * x + 1] = '-';
                     if y > 0 {
-                        new_input[2 * y - 1][2 * x] = '|';
+                        out[2 * y - 1][2 * x] = '|';
                     }
                 }
                 'J' => {
-                    new_input[2 * y][2 * x + 1] = '-';
+                    out[2 * y][2 * x + 1] = '-';
                     if y > 0 {
-                        new_input[2 * y - 1][2 * x] = '|';
+                        out[2 * y - 1][2 * x] = '|';
                     }
                 }
                 '7' => {
-                    new_input[2 * y + 1][2 * x] = '|';
+                    out[2 * y + 1][2 * x] = '|';
                     if x > 0 {
-                        new_input[2 * y][2 * x - 1] = '-';
+                        out[2 * y][2 * x - 1] = '-';
                     }
                 }
                 'F' => {
-                    new_input[2 * y][2 * x + 1] = '-';
-                    new_input[2 * y + 1][2 * x] = '|'
+                    out[2 * y][2 * x + 1] = '-';
+                    out[2 * y + 1][2 * x] = '|'
                 }
                 _ => continue,
             }
         }
     }
-    for line in new_input.iter() {
-        for ch in line.iter() {
-            print!("{}", ch);
-        }
-        println!();
-    }
+    out
+}
 
-    for (y_usize, line) in new_input.iter().enumerate() {
-        let y: i32 = y_usize.try_into().unwrap();
-        for (x_usize, char) in line.iter().enumerate() {
-            let x: i32 = x_usize.try_into().unwrap();
+fn extract_graph(input: Vec<Vec<char>>) -> (HashMap<Node, Vec<Node>>, Node) {
+    let mut start_node: Option<Node> = None;
+    let mut neighbors: HashMap<Node, Vec<Node>> = HashMap::new();
+    for (y, line) in (0i32..).zip(input.iter()) {
+        for (x, char) in (0i32..).zip(line.iter()) {
             let node = Node { x, y };
             if *char == 'S' {
                 start_node = Some(node);
@@ -143,20 +126,26 @@ fn main() -> Result<()> {
         }
     }
 
+    (neighbors, start_node.unwrap())
+}
+
+fn find_main_loop(neighbors: &HashMap<Node, Vec<Node>>, start_node: Node) -> HashMap<Node, usize> {
     let mut main_loop: HashMap<Node, usize> = HashMap::new();
-    main_loop.insert(start_node.unwrap(), 0);
+    main_loop.insert(start_node, 0);
     let mut next_layer: HashSet<Node> = HashSet::new();
     let mut current_level = 1;
 
-    for (node, neighbors) in &neighbors {
-        for neigh in neighbors {
-            if *neigh == start_node.unwrap() {
-                println!("Found start node in neighbors: {:?}", node);
-                main_loop.insert(*node, 1);
-                next_layer.insert(*node);
-            }
+    for node in start_node.all_neighbors() {
+        if neighbors
+            .get(&node)
+            .map_or(false, |adj| adj.contains(&start_node))
+        {
+            println!("Found start node in neighbors: {:?}", node);
+            main_loop.insert(node, 1);
+            next_layer.insert(node);
         }
     }
+
     while !next_layer.is_empty() {
         current_level += 1;
         let current_layer = next_layer;
@@ -172,10 +161,16 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut outside_queue: HashSet<Node> = HashSet::new();
-    let width = (2 * width - 1) as i32;
-    let height = (2 * height - 1) as i32;
+    main_loop
+}
 
+fn find_outside_nodes(
+    main_loop: &HashMap<Node, usize>,
+    neighbors: &HashMap<Node, Vec<Node>>,
+    width: i32,
+    height: i32,
+) -> HashSet<Node> {
+    let mut outside_queue: HashSet<Node> = HashSet::new();
     for x in 0..width + 1 {
         let top_node = Node { x, y: 0 };
         if !main_loop.contains_key(&top_node) {
@@ -206,10 +201,7 @@ fn main() -> Result<()> {
                 true => neighbors[&node].clone(),
             };
             for neighbor in neighbors_to_check {
-                if !neighbor.is_valid(width, height)
-                    // || main_loop.contains_key(&neighbor)
-                    || outside_nodes.contains(&neighbor)
-                {
+                if !neighbor.is_valid(width, height) || outside_nodes.contains(&neighbor) {
                     continue;
                 }
 
@@ -224,14 +216,29 @@ fn main() -> Result<()> {
             outside_queue.len()
         );
     }
-    // let num_inside = (width + 1) * (height + 1) - (outside_nodes.len() as i32);
-    // println!("Num inside: {}", num_inside);
 
-    // println!("Outside nodes: {:?}", outside_nodes);
+    outside_nodes
+}
+
+fn main() -> Result<()> {
+    let input_string = std::fs::read_to_string("day10/src/input.txt")?;
+    let width = input_string.lines().next().unwrap().len();
+    let height = input_string.lines().count();
+    let (neighbors, start_node) = extract_graph(double_maze(input_string, width, height));
+
+    let main_loop = find_main_loop(&neighbors, start_node);
+
     println!("width: {}, height: {}", width, height);
+    let outside_nodes = find_outside_nodes(
+        &main_loop,
+        &neighbors,
+        (2 * width - 1) as i32,
+        (2 * height - 1) as i32,
+    );
+
     let mut num_inside = 0;
-    for y in 0..height + 1 {
-        for x in 0..width + 1 {
+    for y in 0..2 * height as i32 {
+        for x in 0..2 * width as i32 {
             let node = Node { x, y };
             if main_loop.contains_key(&node) {
                 print!(" ");
