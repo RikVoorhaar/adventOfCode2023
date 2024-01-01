@@ -1,170 +1,194 @@
 use anyhow::Result;
-use core::num;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::SubAssign;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 enum Condition {
-    Working,
     Broken,
     Unknown,
 }
 
-#[derive(Clone)]
-struct ConditionRecord {
-    conditions: Vec<Condition>,
-    damaged: Vec<usize>,
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct Group {
+    entries: Vec<Condition>,
 }
-impl Debug for ConditionRecord {
+
+impl Debug for Group {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = String::new();
-        for &c in self.conditions.iter() {
+
+        for &c in self.entries.iter() {
             s.push(match c {
-                Condition::Working => '.',
                 Condition::Broken => '#',
                 Condition::Unknown => '?',
             })
         }
-        write!(f, "{}", s)
+
+        write!(f, "'{}'", s)
     }
 }
 
-impl ConditionRecord {
-    fn check_consistent(&self) -> bool {
-        let mut run = 0;
-        let mut num_unknown = 0;
-        let mut runs = Vec::new();
-        for &condition in self.conditions.iter() {
-            match condition {
-                Condition::Broken => run += 1,
-                Condition::Working => {
-                    if run > 0 {
-                        runs.push(run)
-                    }
-                    run = 0
-                }
-                Condition::Unknown => {
-                    num_unknown += 1;
-                    if run > 0 {
-                        runs.push(run)
-                    }
-                    run = 0
-                }
-            }
-        }
-        if run > 0 {
-            runs.push(run)
-        }
-
-        if num_unknown == 0 {
-            return runs == self.damaged;
-        }
-
-        // println!("{:?}, runs: {:?}, damaged: {:?}", self, runs, self.damaged);
-        let mut damaged_iter = self.damaged.iter();
-        // let mut num_missed = 0;
-        let current_ = damaged_iter.next();
-        if current_.is_none() {
-            return false;
-        }
-        let mut current = *current_.unwrap();
-
-        let mut run_total = 0;
-        for run in runs {
-            run_total += run;
-            while run > current {
-                // num_missed += *current.unwrap();
-                let next_current = damaged_iter.next();
-                if next_current.is_none() {
-                    return false;
-                }
-                current = *next_current.unwrap();
-            }
-            current -= run;
-
-            // num_missed += *current.unwrap() - run;
-        }
-        let damaged_total = self.damaged.iter().sum::<usize>();
-        run_total <= damaged_total && damaged_total <= run_total + num_unknown
-        // num_missed <= num_unknown
+impl Group {
+    fn first_broken(&self) -> Option<usize> {
+        self.entries.iter().position(|&c| c == Condition::Broken)
     }
 
-    fn mutate_condition(&self, pos: usize, cond: Condition) -> Self {
-        let mut new_conditions = self.conditions.clone();
-        new_conditions[pos] = cond;
-        ConditionRecord {
-            conditions: new_conditions,
-            damaged: self.damaged.clone(),
-        }
+    fn is_wildcard(&self) -> bool {
+        self.entries.iter().all(|&c| c == Condition::Unknown)
     }
 
-    fn next_unknown_pos(&self) -> Option<usize> {
-        self.conditions
-            .iter()
-            .position(|&c| c == Condition::Unknown)
+    fn from_string(s: &str) -> Self {
+        let mut entries: Vec<Condition> = Vec::new();
+        for char in s.chars() {
+            let condition = match char {
+                '#' => Condition::Broken,
+                '?' => Condition::Unknown,
+                _ => panic!("Unknown char '{}'", char),
+            };
+            entries.push(condition)
+        }
+
+        Group { entries }
+    }
+
+    fn consume(&self, num: usize) -> Vec<Group> {
+        let mut new_groups: Vec<Group> = Vec::new();
+        let num_entries = self.entries.len();
+        if num_entries < num {
+            return new_groups;
+        }
+
+        let mut max_start = num_entries - num;
+        if let Some(first) = self.first_broken() {
+            if first < max_start {
+                max_start = first
+            }
+        }
+        for start in 0..max_start + 1 {
+            if let Some(Condition::Broken) = self.entries.get(start + num) {
+                continue;
+            }
+            if start + num == num_entries {
+                new_groups.push(Group {
+                    entries: Vec::new(),
+                })
+            } else {
+                new_groups.push(Group {
+                    entries: self.entries[start + num + 1..].to_vec(),
+                });
+            }
+        }
+
+        new_groups
     }
 }
 
-fn find_num_records(record: &ConditionRecord) -> usize {
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct Record {
+    groups: Vec<Group>,
+    numbers: Vec<usize>,
+}
+
+impl Record {
+    fn all_wildcard(&self) -> bool {
+        self.groups.iter().all(|group| group.is_wildcard())
+    }
+
+    fn consume(&mut self) -> Vec<Record> {
+        let group = self.groups.pop();
+        if group.is_none() {
+            return Vec::new();
+        }
+        let group = group.unwrap();
+        let num = self.numbers.pop().unwrap();
+        let mut new_records: Vec<Record> = Vec::new();
+
+        if group.is_wildcard() {
+            let mut new_numbers = self.numbers.clone();
+            new_numbers.push(num);
+            new_records.push(Record {
+                groups: self.groups.clone(),
+                numbers: new_numbers,
+            });
+        }
+
+        if num > group.entries.len() {
+            return new_records;
+        }
+        let new_groups = group.consume(num);
+        for group in new_groups {
+            let mut groups = self.groups.clone();
+            if !group.entries.is_empty() {
+                groups.push(group);
+            }
+            new_records.push(Record {
+                groups,
+                numbers: self.numbers.clone(),
+            })
+        }
+
+        new_records
+    }
+}
+
+fn find_num_records_recursive(record: &Record, cache: &mut HashMap<Record, usize>) -> usize {
+    if let Some(&num) = cache.get(record) {
+        return num;
+    }
+
     let mut num = 0;
 
-    let mut queue: Vec<ConditionRecord> = vec![record.clone()];
-    while let Some(record) = queue.pop() {
-        if let Some(pos) = record.next_unknown_pos() {
-            let record1 = record.mutate_condition(pos, Condition::Broken);
-            if record1.check_consistent() {
-                queue.push(record1)
-            } else {
-            }
-            let record2 = record.mutate_condition(pos, Condition::Working);
-            if record2.check_consistent() {
-                queue.push(record2)
-            } else {
+    let new_records = record.clone().consume();
+    for record in new_records {
+        if record.numbers.is_empty() {
+            if record.all_wildcard() {
+                num += 1
             }
         } else {
-            num += 1
+            num += find_num_records_recursive(&record, cache);
         }
     }
 
-    println!("---------- {}", num);
+    cache.insert(record.clone(), num);
+
     num
 }
 
-fn parse_line(line: &str) -> ConditionRecord {
+fn parse_line(line: &str) -> Record {
+    let repeat = 5;
     let mut split = line.split(' ');
-    let mut condition_vector: Vec<Condition> = Vec::new();
     let condition_part = split.next().unwrap();
     let condition_unfolded = std::iter::repeat(condition_part)
-        .take(5)
+        .take(repeat)
         .collect::<Vec<&str>>()
         .join("?");
     println!("condition_unfolded {}", condition_unfolded);
+    let groups_strings = condition_unfolded.split('.');
+    let groups = groups_strings
+        .map(Group::from_string)
+        .filter(|group| !group.entries.is_empty())
+        .rev()
+        .collect::<Vec<Group>>();
 
-    for char in condition_unfolded.chars() {
-        let condition = match char {
-            '#' => Condition::Broken,
-            '.' => Condition::Working,
-            '?' => Condition::Unknown,
-            _ => panic!("Unknown char '{}'", char),
-        };
-        condition_vector.push(condition)
-    }
     let mut num_vector: Vec<usize> = Vec::new();
-    for num in split.next().unwrap().split(',') {
+    for num in split.next().unwrap().split(',').rev() {
         num_vector.push(num.parse::<usize>().unwrap())
     }
+    println!("{} | {:?} | {:?}", line, groups, num_vector);
 
-    ConditionRecord {
-        conditions: condition_vector,
-        damaged: num_vector.repeat(5),
+    Record {
+        groups,
+        numbers: num_vector.repeat(repeat),
     }
 }
 
 fn main() -> Result<()> {
-    let input = std::fs::read_to_string("day12/src/example.txt")?;
-    let records: Vec<ConditionRecord> = input.lines().map(parse_line).collect();
-    let nums = records.iter().map(find_num_records).collect::<Vec<usize>>();
+    let input = std::fs::read_to_string("day12/src/input.txt")?;
+    let records: Vec<Record> = input.lines().map(parse_line).collect();
+    let nums = records
+        .iter()
+        .map(|record| find_num_records_recursive(record, &mut HashMap::new()))
+        .collect::<Vec<usize>>();
     println!("nums {:?}", nums);
     println!("sum {:?}", nums.iter().sum::<usize>());
 
