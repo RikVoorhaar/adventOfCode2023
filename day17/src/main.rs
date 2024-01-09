@@ -195,9 +195,6 @@ fn main() -> Result<()> {
         },
     ]);
 
-    let mut best_score = usize::MAX;
-
-    let mut num_considered: u64 = 0;
     let mut already_seen: HashSet<StateScore> = HashSet::new();
 
     while let Some(state_score) = queue.pop() {
@@ -216,25 +213,9 @@ fn main() -> Result<()> {
 
         best_val.insert(state.clone(), score);
 
-        let shortest_theoretical =
-            shortest_paths[state.position.y as usize][state.position.x as usize];
-        if score >= best_score.saturating_add(shortest_theoretical) {
-            continue;
-        }
-
-        num_considered += 1;
-
-        if state.position.x == size_x as i32 - 1
-            && state.position.y == size_y as i32 - 1
-            && score < best_score
-        {
-            println!(
-                "Best score: {}. Queue size: {}. Num considered: {}.",
-                score,
-                queue.len(),
-                num_considered,
-            );
-            best_score = score;
+        if state.position.x == size_x as i32 - 1 && state.position.y == size_y as i32 - 1 {
+            println!("Shortest path has score: {}", score);
+            return Ok(());
         }
 
         for new_state in propose_new_entries(state, size_x, size_y) {
@@ -249,10 +230,6 @@ fn main() -> Result<()> {
             });
         }
     }
-    println!(
-        "Best score: {}. Num considered: {}",
-        best_score, num_considered
-    );
 
     Ok(())
 }
