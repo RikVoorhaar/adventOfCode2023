@@ -1,5 +1,8 @@
 use anyhow::Result;
-use std::fmt::{Debug, Formatter};
+use std::{
+    collections::HashSet,
+    fmt::{Debug, Formatter},
+};
 
 #[derive(Debug)]
 
@@ -58,7 +61,14 @@ impl Instruction {
                 Direction::U => (x, y - 1),
                 Direction::D => (x, y + 1),
             };
-            map[y as usize][x as usize] = Terrain::Trench;
+            match self.direction {
+                Direction::L | Direction::R => {
+                    map[y as usize][x as usize] = Terrain::TrenchHorizontal;
+                }
+                Direction::U | Direction::D => {
+                    map[y as usize][x as usize] = Terrain::TrenchVertical;
+                }
+            }
         }
 
         (x, y)
@@ -98,46 +108,113 @@ fn find_size_from_instructions(instructions: &Vec<Instruction>) -> (usize, usize
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Terrain {
-    Trench,
+    TrenchVertical,
+    TrenchHorizontal,
     Ground,
 }
 
 impl Debug for Terrain {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Terrain::Trench => write!(f, "#"),
+            Terrain::TrenchVertical => write!(f, "|"),
+            Terrain::TrenchHorizontal => write!(f, "-"),
             Terrain::Ground => write!(f, "."),
         }
     }
+}
+
+fn terrain_vec_to_string(terrain: &Vec<Terrain>) -> String {
+    let mut s = String::new();
+    for t in terrain.iter() {
+        s.push_str(&format!("{:?}", t));
+    }
+    s
 }
 
 fn count_line(line: Vec<Terrain>) -> usize {
     // The problem with this is that it doesn't always correctly count the inside.
     // For example If we have the pattern '..^v..' then the last two dots are actually outisde, not inside
     // We thus need to modify the algorithm to give us the direction of each trench,
-    // Or at least if it is an up-down or left-right trench. 
+    // Or at least if it is an up-down or left-right trench.
     let mut inside = false;
-    let mut last_was_trench = false;
+    let mut last_was_h_trench = false;
+    let mut last_was_v_trench = false;
     let mut sum = 0;
     for terrain in line.iter() {
         sum += match terrain {
-            Terrain::Trench => {
-                if !last_was_trench {
+            Terrain::TrenchHorizontal => {
+                if !last_was_h_trench && !last_was_v_trench {
                     inside = !inside
                 };
-                last_was_trench = true;
+                last_was_h_trench = true;
+                last_was_v_trench = false;
                 1
             }
+            Terrain::TrenchVertical => {
+                if last_was_v_trench || !last_was_h_trench {
+                    inside = !inside;
+                }
+                last_was_h_trench = false;
+                last_was_v_trench = true;
+                1
+            }
+
             Terrain::Ground => {
-                last_was_trench = false;
+                last_was_h_trench = false;
+                last_was_v_trench = false;
                 if inside {
                     1
                 } else {
                     0
                 }
             }
+        }
+    }
+    println!("sum: {}, {}", sum, terrain_vec_to_string(&line));
+
+    sum
+}
+
+fn count_outside(map: &Vec<Vec<Terrain>>, size_x: usize, size_y: usize) -> usize {
+    let mut queue = Vec::new();
+    let mut seen = HashSet::new();
+    for i in 0..size_x {
+        if map[0][i] == Terrain::Ground {
+            queue.push((i, 0));
+            seen.insert((i, 0));
+        }
+        if map[size_y - 1][i] == Terrain::Ground {
+            queue.push((i, size_y - 1));
+            seen.insert((i, size_y - 1));
+        }
+    }
+    for i in 1..size_y-1 {
+        if map[i][0] == Terrain::Ground {
+            queue.push((0, i));
+            seen.insert((0, i));
+        }
+        if map[i][size_x - 1] == Terrain::Ground {
+            queue.push((size_x - 1, i));
+            seen.insert((size_x - 1, i));
+        }
+    }
+
+    let mut sum = 0;
+    while let Some((x, y)) = queue.pop() {
+        sum += 1;
+        if x > 0 && map[y][x-1] == Terrain::Ground && seen.insert((x - 1, y)) {
+            queue.push((x - 1, y));
+        }
+        if x < size_x - 1 && map[y][x+1] == Terrain::Ground && seen.insert((x + 1, y)) {
+            queue.push((x + 1, y));
+        }
+        if y > 0 && map[y-1][x] == Terrain::Ground && seen.insert((x, y - 1)) {
+            queue.push((x, y - 1));
+        }
+        if y < size_y - 1 && map[y+1][x] == Terrain::Ground && seen.insert((x, y + 1)) {
+            queue.push((x, y + 1));
         }
     }
 
@@ -155,6 +232,7 @@ fn main() -> Result<()> {
     let (start_x, size_x, start_y, size_y) = find_size_from_instructions(&instructions);
     println!("{} {} {} {}", start_x, size_x, start_y, size_y);
 
+    // let size_x = size_x+1;
     let mut map = vec![vec![Terrain::Ground; size_x]; size_y];
 
     let mut x = start_x as i32;
@@ -164,13 +242,23 @@ fn main() -> Result<()> {
         (x, y) = instruction.modify_map(&mut map, x, y);
     }
 
-    // println!("{:?}", map);
-
     let mut sum = 0;
     for line in map.iter() {
         sum += count_line(line.clone());
     }
     println!("{}", sum);
+    let num_outside = count_outside(&map, size_x, size_y);
+    let mut num_hedge = 0;
+    for line in map.iter() {
+        for terrain in line.iter() {
+            if *terrain != Terrain::Ground {
+                num_hedge += 1;
+            }
+        }
+    }
+    let num_inside = size_x*size_y - num_outside;
+    println!("{} {} {}", num_outside, num_inside, num_hedge);
+    // println!("{}", count_outside(&map, size_x, size_y));
 
     Ok(())
 }
