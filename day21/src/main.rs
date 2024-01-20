@@ -1,6 +1,6 @@
 use anyhow::Result;
-use sprs::{CsMat, CsVec, TriMat};
 use std::{
+    cmp::Ordering::{Equal, Greater, Less},
     collections::{HashMap, HashSet},
     fmt::Debug,
 };
@@ -8,8 +8,8 @@ use std::{
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]
 
 struct Pos {
-    x: i32,
-    y: i32,
+    x: i64,
+    y: i64,
 }
 
 impl Debug for Pos {
@@ -48,8 +48,8 @@ impl Pos {
 
 struct Garden {
     table: Vec<Vec<bool>>,
-    size_x: i32,
-    size_y: i32,
+    size_x: i64,
+    size_y: i64,
     start_pos: Pos,
 }
 
@@ -67,16 +67,16 @@ impl Garden {
                 }
                 if c == 'S' {
                     start_pos = Pos {
-                        x: x as i32,
-                        y: y as i32,
+                        x: x as i64,
+                        y: y as i64,
                     };
                 }
             }
         }
         Garden {
             table,
-            size_x: size_x as i32,
-            size_y: size_y as i32,
+            size_x: size_x as i64,
+            size_y: size_y as i64,
             start_pos,
         }
     }
@@ -103,7 +103,7 @@ impl Garden {
             || pos_y == 130;
     }
 
-    fn closest_corners(&self, pos: Pos) -> Vec<(i32, i32)> {
+    fn closest_corners(&self, pos: Pos) -> Vec<(i64, i64)> {
         let (pos_x, pos_y) = self.get_mod_pos(pos);
         match (pos_x <= 65, pos_y <= 65) {
             (true, true) => vec![(0, 0), (0, 65), (65, 0), (65, 65)],
@@ -113,10 +113,10 @@ impl Garden {
         }
     }
 
-    fn map_pos_to_corner(&self, pos: Pos, corner: (i32, i32)) -> Pos {
+    fn map_pos_to_corner(&self, pos: Pos, corner: (i64, i64)) -> Pos {
         let (pos_x, pos_y) = self.get_mod_pos(pos);
-        let pos_x_norm = pos.x - pos_x as i32;
-        let pos_y_norm = pos.y - pos_y as i32;
+        let pos_x_norm = pos.x - pos_x as i64;
+        let pos_y_norm = pos.y - pos_y as i64;
         Pos {
             x: corner.0 + pos_x_norm,
             y: corner.1 + pos_y_norm,
@@ -166,7 +166,7 @@ fn count_reachable(plots_reached: &HashMap<Pos, usize>, step_num: usize) -> usiz
 fn compute_num_reachable(
     tot_num_steps: usize,
     garden: &Garden,
-    corner_to_distances: &HashMap<(i32, i32), [[usize; 131]; 131]>,
+    corner_to_distances: &HashMap<(i64, i64), [[usize; 131]; 131]>,
 ) {
     let mut mod_reached: Vec<Vec<Vec<(Pos, usize)>>> =
         vec![vec![vec![]; garden.size_x as usize]; garden.size_y as usize];
@@ -174,6 +174,8 @@ fn compute_num_reachable(
     plots_reached.insert(garden.start_pos, 0);
     let mut frontier: HashSet<Pos> = HashSet::new();
     frontier.insert(garden.start_pos);
+    let mut num_reached_even = 1;
+    let mut num_reached_odd = 0;
     for step_num in 1..tot_num_steps + 1 {
         frontier = step(
             garden,
@@ -182,12 +184,28 @@ fn compute_num_reachable(
             frontier,
             &mut mod_reached,
         );
-        let num_wrong = frontier
-            .iter()
-            .map(|&pos| compute_distance(pos, garden, corner_to_distances))
-            .filter(|&x| x != step_num)
-            .count();
-        println!("Step: {}, frontier: {}, num wrong distances: {}", step_num, frontier.len(), num_wrong);
+        // let num_wrong = frontier
+        //     .iter()
+        //     .map(|&pos| compute_distance(pos, garden, corner_to_distances))
+        //     .filter(|&x| x != step_num)
+        //     .count();
+        match step_num % 2 {
+            0 => num_reached_even += frontier.len(),
+            1 => num_reached_odd += frontier.len(),
+            _ => unreachable!(),
+        }
+        let num_reached = match step_num % 2 {
+            0 => num_reached_even,
+            1 => num_reached_odd,
+            _ => unreachable!(),
+        };
+        println!(
+            "Step: {}, frontier: {}, reachable: {}",
+            step_num,
+            frontier.len(),
+            // num_wrong,
+            num_reached
+        );
     }
     println!(
         "Plots reached: {}",
@@ -235,6 +253,11 @@ fn find_distances_to_points<const N: usize>(
         frontier = new_frontier;
         current_distance += 1;
     }
+    println!(
+        "Longest distance for {:?} is {}",
+        starting_point,
+        current_distance - 1
+    );
 
     distances
 }
@@ -252,7 +275,7 @@ fn vec_table_to_array<const N: usize>(table: &Vec<Vec<bool>>) -> [[bool; N]; N] 
 fn compute_distance(
     pos: Pos,
     garden: &Garden,
-    corner_to_distances: &HashMap<(i32, i32), [[usize; 131]; 131]>,
+    corner_to_distances: &HashMap<(i64, i64), [[usize; 131]; 131]>,
 ) -> usize {
     if garden.is_border(pos) {
         return pos.distance();
@@ -273,13 +296,149 @@ fn compute_distance(
     min_dist
 }
 
+// TODO: This is just wrong; because it assumes that all points are reachable I suppose. 
+// We can just use the existing distance map from (65,65) and count the number of even
+// and odd distances... 
+fn num_odd_even_plots<const N: usize>(table: &[[bool; N]; N]) -> (usize, usize) {
+    let mut num_odd = 0;
+    let mut num_even = 0;
+    for (i, row) in table.iter().enumerate() {
+        for (j, &is_plot) in row.iter().enumerate() {
+            if is_plot {
+                let pos = Pos {
+                    x: (i as i64 - 65),
+                    y: (j as i64 - 65),
+                };
+
+                if pos.distance() % 2 == 0 {
+                    num_even += 1;
+                } else {
+                    num_odd += 1;
+                }
+            }
+        }
+    }
+    (num_odd, num_even)
+}
+
+fn count_num_lattice_points(d: f64) -> (usize, usize, Vec<Pos>) {
+    let mut num_odd = 0;
+    let mut num_even = 0;
+    let r = (d + 1.0).ceil() as i64;
+    let r2 = (d * d).floor() as i64;
+    let outer_r2 = ((d + 1.0) * (d + 1.0)).floor() as i64;
+    let mut overlap_points = Vec::new();
+    for y in -r..=r {
+        let x_length = ((r2 - y * y) as f64).sqrt().floor() as i64;
+        for &x in &[
+            x_length - 1,
+            x_length,
+            x_length + 1,
+            -x_length - 1,
+            -x_length,
+            -x_length + 1,
+        ] {
+            let dist2 = x * x + y * y;
+            if dist2 > r2 && dist2 <= outer_r2 {
+                overlap_points.push(Pos { x, y });
+            }
+        }
+
+        if x_length < 0 {
+            continue;
+        }
+        let total_points = 2 * x_length + 1;
+        let (odd, even) = if (y + x_length) % 2 != 0 {
+            ((total_points + 1) / 2, total_points / 2)
+        } else {
+            (total_points / 2, (total_points + 1) / 2)
+        };
+
+        num_odd += odd as usize;
+        num_even += even as usize;
+    }
+
+    (num_odd, num_even, overlap_points)
+}
+fn count_num_lattice_points_dumb(d: f64) -> (usize, usize, Vec<Pos>) {
+    let mut num_odd = 0;
+    let mut num_even = 0;
+    let r = (d + 1.0).ceil() as i64;
+    let r2 = ((d - 1.0) * (d - 1.0)).floor() as i64;
+    let outer_r2 = ((d + 1.0) * (d + 1.0)).floor() as i64;
+    let mut overlap_points = Vec::new();
+    for y in -r..=r {
+        for x in -r..=r {
+            println!(
+                "x: {}, y: {}, r: {}, r2: {}, outer_r2: {}",
+                x, y, r, r2, outer_r2
+            );
+            let dist = x * x + y * y;
+            if dist <= r2 && d > 1.0 {
+                if (x + y) % 2 == 0 {
+                    num_even += 1;
+                } else {
+                    num_odd += 1;
+                }
+            } else if dist <= outer_r2 {
+                overlap_points.push(Pos { x, y });
+            }
+        }
+    }
+    (num_odd, num_even, overlap_points)
+}
+
+/// For a 131x131 tile, find the coordinates of the corner closest to the origin
+fn closest_corner(tile_pos: Pos) -> (Pos, Pos) {
+    let x = match tile_pos.x.cmp(&0) {
+        Equal => 65,
+        Less => 130,
+        Greater => 0,
+    };
+    let y = match tile_pos.y.cmp(&0) {
+        Equal => 65,
+        Less => 130,
+        Greater => 0,
+    };
+    (
+        Pos { x, y },
+        Pos {
+            x: x + 131 * tile_pos.x,
+            y: y + 131 * tile_pos.y,
+        },
+    )
+}
+
+fn num_reachable_from(
+    corner: Pos,
+    distance_left: usize,
+    corner_to_distances: &HashMap<(i64, i64), [[usize; 131]; 131]>,
+    table: &[[bool; 131]; 131],
+) -> usize {
+    println!("corner: {:?}", corner);
+    let map = corner_to_distances[&(corner.x, corner.y)];
+    let res = map
+        .iter()
+        .flatten()
+        .zip(table.iter().flatten())
+        .filter(|(&dist, &is_plot)| {
+            is_plot && dist <= distance_left && dist % 2 == distance_left % 2
+        })
+        .count();
+    println!(
+        "corner: {:?}, distance_left: {}, res: {}",
+        corner, distance_left, res
+    );
+    res
+}
+
 fn main() -> Result<()> {
     let input = std::fs::read_to_string("day21/src/input.txt")?;
 
     let garden = Garden::from_string(&input);
 
     let table_mat = vec_table_to_array::<131>(&garden.table);
-    let corners = vec![
+    let corners = [
         (0, 0),
         (0, 65),
         (0, 130),
@@ -306,39 +465,7 @@ fn main() -> Result<()> {
         })
         .collect::<HashMap<_, _>>();
 
-    compute_num_reachable(100, &garden, &corner_to_distances);
-
-    // let mut quadrant: Vec<Vec<bool>> = Vec::new();
-    // let quadrant_start_x = 1;
-    // let quadrant_start_y = 1;
-    // let quadrant_size = 64;
-    // for row in garden
-    //     .table
-    //     .iter()
-    //     .skip(quadrant_start_y)
-    //     .take(quadrant_size)
-    // {
-    //     quadrant.push(
-    //         row.iter()
-    //             .skip(quadrant_start_x)
-    //             .take(quadrant_size)
-    //             .copied()
-    //             .collect(),
-    //     );
-    // }
-    // print_quadrant(&quadrant);
-
-    // let print_pos_x = 4;
-    // let print_pos_y = 6;
-    // for (pos, num) in mod_reached[print_pos_y][print_pos_x].iter() {
-    //     let num_mod = num % (garden.size_x as usize);
-    //     let num_div = (num - num_mod) / (garden.size_x as usize);
-    //     let dist = pos.x.abs() + pos.y.abs();
-    //     println!(
-    //         "Pos: {:?}, dist: {}, num: {}, num mod: {}, num div: {}",
-    //         pos, dist, num, num_mod, num_div
-    //     );
-    // }
+    // compute_num_reachable(1000, &garden, &corner_to_distances);
 
     let mut num_false_col = vec![0; garden.size_y as usize];
     for (i, row) in garden.table.iter().enumerate() {
@@ -359,6 +486,60 @@ fn main() -> Result<()> {
         }
     }
     println!("Start pos {:?}", garden.start_pos);
+
+    let (num_plots_in_odd, num_plots_in_even) = num_odd_even_plots(&table_mat);
+    println!(
+        "Num odd: {}, num even: {}",
+        num_plots_in_odd, num_plots_in_even
+    );
+
+    let mut distance_cache: HashMap<(Pos, usize), usize> = HashMap::new();
+    let num_steps = 2;
+
+    let radius_tiles = ((num_steps as f64) / 131.0).max(0.0);
+
+    let mut num_reachable = 0;
+
+    let (num_odd_tiles, num_even_tiles, boundary_points) = count_num_lattice_points(radius_tiles);
+    let (num_odd_tiles, num_even_tiles, boundary_points) =
+        count_num_lattice_points_dumb(radius_tiles - 0.5);
+    println!(
+        "smart. r: {}, odd/even/tot: {}, {}, {}. Boundary length: {}", //; dumb: {}, {}, {}.",
+        radius_tiles,
+        num_odd_tiles,
+        num_even_tiles,
+        num_odd_tiles + num_even_tiles,
+        boundary_points.len(),
+    );
+
+    if num_steps % 2 == 1 {
+        num_reachable += num_even_tiles * num_plots_in_even + num_odd_tiles * num_plots_in_odd;
+    } else {
+        num_reachable += num_odd_tiles * num_plots_in_even + num_even_tiles * num_plots_in_odd;
+    }
+    for tile in boundary_points {
+        let (corner_mod, corner) = closest_corner(tile);
+        let d = corner.distance();
+        if d > num_steps {
+            continue;
+        }
+        let distance_remaining = num_steps - d;
+        println!(
+            "Corner: {:?}, corner_mod: {:?}, distance_remaining: {}",
+            corner, corner_mod, distance_remaining
+        );
+        num_reachable += *distance_cache
+            .entry((corner_mod, distance_remaining))
+            .or_insert_with(|| {
+                num_reachable_from(
+                    corner_mod,
+                    distance_remaining,
+                    &corner_to_distances,
+                    &table_mat,
+                )
+            });
+    }
+    println!("Num steps: {}, Num reachable: {}", num_steps, num_reachable);
 
     Ok(())
     // Next up, we need to compute the cost of going one up/down based on neighbors.
@@ -395,6 +576,7 @@ fn main() -> Result<()> {
     // Next: We have to test this function 'compute distance' and compare it to existing
     // things. Just discover points distance wise and check if the function returns
     // true.
+    // (DONE)
     //
     // After that we have to check what the maximum value of the distances is, that way
     // We can for each square immediately tell if it is reached within the specified
@@ -407,6 +589,10 @@ fn main() -> Result<()> {
     // computationally feasible, actually. But we can do a lot of caching; We just need
     // to compute the number of squares that are reachable. This is always going to be
     // the same, depending on which corner is closest to the starting point.
+    //
+    // Yes, largest distance is 261 for corners, 131 for middle and 196 for sides.
+    // We also need to determine if a square is 'odd' or 'even', and we need to determine
+    // The number of odd and even squares without rocks
     //
     // So really we just need to compute for each square, which corner is closest to starting point,
     // And then look up how many points fit within a certain range of distances.
