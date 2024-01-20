@@ -229,7 +229,7 @@ fn find_distances_to_points<const N: usize>(
     table: &[[bool; N]; N],
     starting_point: Pos,
 ) -> [[usize; N]; N] {
-    let mut distances = [[0usize; N]; N];
+    let mut distances = [[usize::MAX; N]; N];
     let mut current_distance = 0;
     let mut frontier = vec![starting_point];
     while !frontier.is_empty() {
@@ -242,7 +242,7 @@ fn find_distances_to_points<const N: usize>(
             let x = pos.x as usize;
             let y = pos.y as usize;
 
-            if table[y][x] && distances[y][x] == 0 {
+            if table[y][x] && distances[y][x] == usize::MAX {
                 distances[y][x] = current_distance;
                 new_frontier.extend(pos.neighbors())
             }
@@ -296,9 +296,9 @@ fn compute_distance(
     min_dist
 }
 
-// TODO: This is just wrong; because it assumes that all points are reachable I suppose. 
+// TODO: This is just wrong; because it assumes that all points are reachable I suppose.
 // We can just use the existing distance map from (65,65) and count the number of even
-// and odd distances... 
+// and odd distances...
 fn num_odd_even_plots<const N: usize>(table: &[[bool; N]; N]) -> (usize, usize) {
     let mut num_odd = 0;
     let mut num_even = 0;
@@ -324,27 +324,25 @@ fn num_odd_even_plots<const N: usize>(table: &[[bool; N]; N]) -> (usize, usize) 
 fn count_num_lattice_points(d: f64) -> (usize, usize, Vec<Pos>) {
     let mut num_odd = 0;
     let mut num_even = 0;
-    let r = (d + 1.0).ceil() as i64;
-    let r2 = (d * d).floor() as i64;
-    let outer_r2 = ((d + 1.0) * (d + 1.0)).floor() as i64;
+    let boundary_width: f64 = 100.0;
+    let boundary_width_int = boundary_width.ceil() as i64;
+    let r = (d + boundary_width).ceil() as i64;
+    let r2 = ((d) * (d)).floor() as i64;
+    let inner_r2 = ((d - boundary_width).max(0.0) * (d - boundary_width).max(0.0)).floor() as i64;
+    let outer_r2 = ((d + boundary_width) * (d + boundary_width)).floor() as i64;
+
     let mut overlap_points = Vec::new();
     for y in -r..=r {
-        let x_length = ((r2 - y * y) as f64).sqrt().floor() as i64;
-        for &x in &[
-            x_length - 1,
-            x_length,
-            x_length + 1,
-            -x_length - 1,
-            -x_length,
-            -x_length + 1,
-        ] {
+        let x_length = ((inner_r2 - y * y) as f64).sqrt().floor() as i64;
+        for x in x_length - 2*boundary_width_int..=x_length + 2*boundary_width_int {
             let dist2 = x * x + y * y;
-            if dist2 > r2 && dist2 <= outer_r2 {
+            // println!("x,y:{},{}, dist2: {}. inner_r2 {}, outer_r2 {}",x, y, dist2, inner_r2, outer_r2);
+            if dist2 >= inner_r2 && dist2 <= outer_r2 {
                 overlap_points.push(Pos { x, y });
             }
         }
 
-        if x_length < 0 {
+        if x_length <= 0 {
             continue;
         }
         let total_points = 2 * x_length + 1;
@@ -363,18 +361,20 @@ fn count_num_lattice_points(d: f64) -> (usize, usize, Vec<Pos>) {
 fn count_num_lattice_points_dumb(d: f64) -> (usize, usize, Vec<Pos>) {
     let mut num_odd = 0;
     let mut num_even = 0;
-    let r = (d + 1.0).ceil() as i64;
-    let r2 = ((d - 1.0) * (d - 1.0)).floor() as i64;
-    let outer_r2 = ((d + 1.0) * (d + 1.0)).floor() as i64;
+    let boundary_width = 10.0;
+
+    let r = (d + boundary_width).ceil() as i64;
+    let r2 = ((d - boundary_width) * (d - boundary_width)).floor() as i64;
+    let outer_r2 = ((d + boundary_width) * (d + boundary_width)).floor() as i64;
     let mut overlap_points = Vec::new();
     for y in -r..=r {
         for x in -r..=r {
-            println!(
-                "x: {}, y: {}, r: {}, r2: {}, outer_r2: {}",
-                x, y, r, r2, outer_r2
-            );
+            // println!(
+            //     "x: {}, y: {}, r: {}, r2: {}, outer_r2: {}",
+            //     x, y, r, r2, outer_r2
+            // );
             let dist = x * x + y * y;
-            if dist <= r2 && d > 1.0 {
+            if dist <= r2 && d > boundary_width {
                 if (x + y) % 2 == 0 {
                     num_even += 1;
                 } else {
@@ -415,7 +415,7 @@ fn num_reachable_from(
     corner_to_distances: &HashMap<(i64, i64), [[usize; 131]; 131]>,
     table: &[[bool; 131]; 131],
 ) -> usize {
-    println!("corner: {:?}", corner);
+    // println!("corner: {:?}", corner);
     let map = corner_to_distances[&(corner.x, corner.y)];
     let res = map
         .iter()
@@ -425,11 +425,28 @@ fn num_reachable_from(
             is_plot && dist <= distance_left && dist % 2 == distance_left % 2
         })
         .count();
-    println!(
-        "corner: {:?}, distance_left: {}, res: {}",
-        corner, distance_left, res
-    );
+    // println!(
+    //     "corner: {:?}, distance_left: {}, res: {}",
+    //     corner, distance_left, res
+    // );
     res
+}
+fn print_reachable(
+    corner: Pos,
+    distance_left: usize,
+    corner_to_distances: &HashMap<(i64, i64), [[usize; 131]; 131]>,
+    table: &[[bool; 131]; 131],
+) {
+    let map = corner_to_distances[&(corner.x, corner.y)];
+    print!("Corner: {:?}, distnace_left: {}", corner, distance_left);
+    for (y, row) in map.iter().enumerate() {
+        for (x, &dist) in row.iter().enumerate() {
+            if table[y][x] && dist <= distance_left && dist % 2 == distance_left % 2 {
+                print!("({}, {})", x, y);
+            }
+        }
+    }
+    println!();
 }
 
 fn main() -> Result<()> {
@@ -465,7 +482,7 @@ fn main() -> Result<()> {
         })
         .collect::<HashMap<_, _>>();
 
-    // compute_num_reachable(1000, &garden, &corner_to_distances);
+    // compute_num_reachable(2000, &garden, &corner_to_distances);
 
     let mut num_false_col = vec![0; garden.size_y as usize];
     for (i, row) in garden.table.iter().enumerate() {
@@ -487,22 +504,27 @@ fn main() -> Result<()> {
     }
     println!("Start pos {:?}", garden.start_pos);
 
-    let (num_plots_in_odd, num_plots_in_even) = num_odd_even_plots(&table_mat);
+    // let (num_plots_in_odd, num_plots_in_even) = num_odd_even_plots(&table_mat);
+    let num_plots_in_odd =
+        num_reachable_from(Pos { x: 65, y: 65 }, 133, &corner_to_distances, &table_mat);
+    let num_plots_in_even =
+        num_reachable_from(Pos { x: 65, y: 65 }, 132, &corner_to_distances, &table_mat);
     println!(
         "Num odd: {}, num even: {}",
         num_plots_in_odd, num_plots_in_even
     );
 
     let mut distance_cache: HashMap<(Pos, usize), usize> = HashMap::new();
-    let num_steps = 2;
+    let num_steps = 26501365;
+    // let num_steps = 2000;
 
     let radius_tiles = ((num_steps as f64) / 131.0).max(0.0);
 
     let mut num_reachable = 0;
 
-    let (num_odd_tiles, num_even_tiles, boundary_points) = count_num_lattice_points(radius_tiles);
     let (num_odd_tiles, num_even_tiles, boundary_points) =
-        count_num_lattice_points_dumb(radius_tiles - 0.5);
+        count_num_lattice_points(radius_tiles - 0.5);
+    // println!("Boundary points: {:?}", boundary_points);
     println!(
         "smart. r: {}, odd/even/tot: {}, {}, {}. Boundary length: {}", //; dumb: {}, {}, {}.",
         radius_tiles,
@@ -511,8 +533,18 @@ fn main() -> Result<()> {
         num_odd_tiles + num_even_tiles,
         boundary_points.len(),
     );
+    // let (num_odd_tiles, num_even_tiles, boundary_points) =
+    //     count_num_lattice_points_dumb(radius_tiles - 0.5);
+    // println!(
+    //     "dumb. r: {}, odd/even/tot: {}, {}, {}. Boundary length: {}", //; dumb: {}, {}, {}.",
+    //     radius_tiles,
+    //     num_odd_tiles,
+    //     num_even_tiles,
+    //     num_odd_tiles + num_even_tiles,
+    //     boundary_points.len(),
+    // );
 
-    if num_steps % 2 == 1 {
+    if num_steps % 2 == 0 {
         num_reachable += num_even_tiles * num_plots_in_even + num_odd_tiles * num_plots_in_odd;
     } else {
         num_reachable += num_odd_tiles * num_plots_in_even + num_even_tiles * num_plots_in_odd;
@@ -524,10 +556,10 @@ fn main() -> Result<()> {
             continue;
         }
         let distance_remaining = num_steps - d;
-        println!(
-            "Corner: {:?}, corner_mod: {:?}, distance_remaining: {}",
-            corner, corner_mod, distance_remaining
-        );
+        // println!(
+        //     "Corner: {:?}, corner_mod: {:?}, distance_remaining: {}",
+        //     corner, corner_mod, distance_remaining
+        // );
         num_reachable += *distance_cache
             .entry((corner_mod, distance_remaining))
             .or_insert_with(|| {
@@ -540,6 +572,9 @@ fn main() -> Result<()> {
             });
     }
     println!("Num steps: {}, Num reachable: {}", num_steps, num_reachable);
+    // print_reachable(Pos { x: 65, y: 65 }, 0, &corner_to_distances, &table_mat);
+    // print_reachable(Pos { x: 65, y: 65 }, 1, &corner_to_distances, &table_mat);
+    // print_reachable(Pos { x: 65, y: 65 }, 2, &corner_to_distances, &table_mat);
 
     Ok(())
     // Next up, we need to compute the cost of going one up/down based on neighbors.
