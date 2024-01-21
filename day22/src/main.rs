@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use anyhow::Result;
@@ -86,6 +86,7 @@ impl Brick {
     }
 }
 
+
 fn main() -> Result<()> {
     let input = std::fs::read_to_string("day22/src/example.txt")?;
     let mut bricks = Vec::new();
@@ -101,5 +102,29 @@ fn main() -> Result<()> {
         bricks.push(brick);
     }
 
+    let mut supports: Vec<HashSet<usize>> = vec![HashSet::new(); bricks.len()];
+    for (i, brick) in bricks.iter().enumerate() {
+        for j in brick
+            .blocks()
+            .iter()
+            .flat_map(|pos3| brick_map.get(&pos3.project()).unwrap())
+            .filter(|&&j| j != i)
+        {
+            let other_brick = &bricks[*j];
+            if other_brick.pos1.z > brick.pos2.z {
+                supports[i].insert(*j);
+                println!("Brick {} supports {}", i, j);
+            }
+        }
+    }
+
     Ok(())
 }
+
+// I think we actually need to compute the final configuration, and then compute which
+// brick supports which brick.  
+// To compute this we can do the following. For each brick, check how much empty space
+// is below it using the projection hashmap. This is the maximum z-coordinate of the
+// bricks below it. (Or zero).
+// Then we move the brick down by that amount.
+// We repeat the procedure until all bricks are in their resting position.
