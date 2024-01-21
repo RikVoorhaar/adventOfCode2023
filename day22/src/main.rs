@@ -14,11 +14,13 @@ use anyhow::Result;
 /// Then we iterate over all the bricks, use the hashmap to find potential bricks that
 /// could be aboce them. If there are none then we add one to the counter.
 
+#[derive(Clone)]
 struct Brick {
     pos1: Pos3,
     pos2: Pos3,
 }
 
+#[derive(Clone)]
 struct Pos3 {
     x: usize,
     y: usize,
@@ -84,8 +86,24 @@ impl Brick {
         }
         out
     }
+
+    fn move_down(&mut self, z: usize) {
+        let height = self.pos2.z - self.pos1.z;
+        self.pos1.z = z;
+        self.pos2.z = z + height;
+    }
 }
 
+fn find_new_z(brick: &Brick, brick_map: &HashMap<Pos2, Vec<usize>>, bricks: &Vec<Brick>) -> usize {
+    brick
+        .blocks()
+        .iter()
+        .flat_map(|pos3| brick_map.get(&pos3.project()).unwrap())
+        .map(|&brick_index| bricks[brick_index].pos2.z + 1)
+        .filter(|&z| z <= brick.pos1.z)
+        .max()
+        .unwrap_or(1)
+}
 
 fn main() -> Result<()> {
     let input = std::fs::read_to_string("day22/src/example.txt")?;
@@ -101,8 +119,26 @@ fn main() -> Result<()> {
             .for_each(|pos| brick_map.entry(pos).or_default().push(i));
         bricks.push(brick);
     }
+    let mut updates = Vec::new();
+    loop {
+        for (i, brick) in bricks.iter().enumerate() {
+            let new_z = find_new_z(brick, &brick_map, &bricks);
+            if new_z != brick.pos1.z {
+                updates.push((i, new_z));
+            }
+        }
+        if updates.is_empty() {
+            break;
+        }
+
+        println!("Updating {} bricks", updates.len());
+        for (i, new_z) in updates.drain(..) {
+            bricks[i].move_down(new_z);
+        }
+    }
 
     let mut supports: Vec<HashSet<usize>> = vec![HashSet::new(); bricks.len()];
+    let mut supported_by: Vec<HashSet<usize>> = vec![HashSet::new(); bricks.len()];
     for (i, brick) in bricks.iter().enumerate() {
         for j in brick
             .blocks()
@@ -111,20 +147,43 @@ fn main() -> Result<()> {
             .filter(|&&j| j != i)
         {
             let other_brick = &bricks[*j];
-            if other_brick.pos1.z > brick.pos2.z {
+            if other_brick.pos1.z == brick.pos2.z + 1 {
                 supports[i].insert(*j);
-                println!("Brick {} supports {}", i, j);
+                supported_by[*j].insert(i);
+                // println!("Brick {} supports {}", i, j);
             }
         }
     }
+
+    let mut num_will_fall = 0;
+
+    for (i, supported_inds) in supports.iter().enumerate() {
+        let num_fall = supported_inds
+            .iter()
+            .filter(|&j| supported_by[*j].len() == 1)
+            .count();
+        println!(
+            "Disentigrating {} will cause {} bricks to fall",
+            i, num_fall
+        );
+        // println!("Brick {} can be disentigrated", i);
+        num_will_fall += num_fall;
+    }
+    // println!("Number of disentigratable bricks: {}", num_disentigratable);
+    println!("Number of bricks that will fall: {}", num_will_fall);
+    
 
     Ok(())
 }
 
 // I think we actually need to compute the final configuration, and then compute which
-// brick supports which brick.  
+// brick supports which brick.
 // To compute this we can do the following. For each brick, check how much empty space
 // is below it using the projection hashmap. This is the maximum z-coordinate of the
 // bricks below it. (Or zero).
 // Then we move the brick down by that amount.
 // We repeat the procedure until all bricks are in their resting position.
+
+// For part two: we have to use the two 'supports' and 'supported_by' to recursively
+// Find the bricks that will fall. And this really can be recursive; we can use a hashmap
+// If a bricks falls, and it supports another brick uniquely, that one will also fall. 
