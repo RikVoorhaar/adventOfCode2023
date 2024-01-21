@@ -324,7 +324,7 @@ fn num_odd_even_plots<const N: usize>(table: &[[bool; N]; N]) -> (usize, usize) 
 fn count_num_lattice_points(d: f64) -> (usize, usize, Vec<Pos>) {
     let mut num_odd = 0;
     let mut num_even = 0;
-    let boundary_width: f64 = 100.0;
+    let boundary_width: f64 = 4.0;
     let boundary_width_int = boundary_width.ceil() as i64;
     let r = (d + boundary_width).ceil() as i64;
     let r2 = ((d) * (d)).floor() as i64;
@@ -332,19 +332,38 @@ fn count_num_lattice_points(d: f64) -> (usize, usize, Vec<Pos>) {
     let outer_r2 = ((d + boundary_width) * (d + boundary_width)).floor() as i64;
 
     let mut overlap_points = Vec::new();
+    print!("Including: ");
     for y in -r..=r {
-        let x_length = ((inner_r2 - y * y) as f64).sqrt().floor() as i64;
-        for x in x_length - 2*boundary_width_int..=x_length + 2*boundary_width_int {
-            let dist2 = x * x + y * y;
+        print!(" | ");
+        let y2 = y * y;
+        let x_length = ((inner_r2 - y2) as f64).sqrt().floor() as i64;
+        for x in x_length + 1..=x_length + boundary_width_int {
+            let dist2 = x * x + y2;
             // println!("x,y:{},{}, dist2: {}. inner_r2 {}, outer_r2 {}",x, y, dist2, inner_r2, outer_r2);
-            if dist2 >= inner_r2 && dist2 <= outer_r2 {
+            if dist2 >= inner_r2 && dist2 < outer_r2 {
+                print!("({}, {}), ", x, y);
                 overlap_points.push(Pos { x, y });
+                if x != 0 {
+                    overlap_points.push(Pos { x: -x, y });
+                    print!("({}, {}), ", -x, y);
+                }
             }
         }
 
-        if x_length <= 0 {
+        if y2 > inner_r2 {
+            let x = x_length;
+            print!("({}, {}), ", x, y);
+            overlap_points.push(Pos { x, y });
+            if x > 0 {
+                print!("({}, {}), ", -x, y);
+                overlap_points.push(Pos { x: -x, y });
+            }
             continue;
         }
+
+        // for x in -x_length..=x_length {
+        //     print!("({}, {}), ", x, y);
+        // }
         let total_points = 2 * x_length + 1;
         let (odd, even) = if (y + x_length) % 2 != 0 {
             ((total_points + 1) / 2, total_points / 2)
@@ -355,6 +374,67 @@ fn count_num_lattice_points(d: f64) -> (usize, usize, Vec<Pos>) {
         num_odd += odd as usize;
         num_even += even as usize;
     }
+    println!();
+
+    (num_odd, num_even, overlap_points)
+}
+
+/// Get all the tiles at a manhattan distance of d from the origin
+fn get_tiles_at_distance(d: i64) -> Vec<Pos> {
+    let mut out = Vec::new();
+
+    for x in 0..=d {
+        let y = d - x;
+        out.push(Pos { x, y });
+        match (x == 0, y == 0) {
+            (false, false) => {
+                out.push(Pos { x: -x, y });
+                out.push(Pos { x, y: -y });
+                out.push(Pos { x: -x, y: -y });
+            }
+            (true, false) => {
+                out.push(Pos { x, y: -y });
+            }
+            (false, true) => {
+                out.push(Pos { x: -x, y });
+            }
+            (true, true) => (),
+        }
+    }
+
+    out
+}
+
+/// We shouldn't be using a euclidean circle; but a cirlce in the manhattan distance
+/// That actually makes it easier. We just need to iterate over all the pairs of
+/// points With |x|+|y| = (something). By symmetry we just pick the points with
+/// positive x,y and then complete the rest.
+fn count_num_lattice_points_manhattan(d: f64) -> (usize, usize, Vec<Pos>) {
+    let mut num_odd = 0;
+    let mut num_even = 0;
+    let boundary_width: i64 = 2;
+    let r = d.ceil() as i64;
+    let r_inner = r - boundary_width;
+    let r_outer = r + boundary_width;
+
+    for y in -r_inner..=r_inner {
+        let x_length = r_inner - y.abs();
+
+        let total_points = 2 * x_length + 1;
+        let (odd, even) = if (y + x_length) % 2 != 0 {
+            ((total_points + 1) / 2, total_points / 2)
+        } else {
+            (total_points / 2, (total_points + 1) / 2)
+        };
+        num_odd += odd as usize;
+        num_even += even as usize;
+    }
+
+    let mut overlap_points = Vec::new();
+    for r in r_inner+1..=r_outer {
+        overlap_points.extend(get_tiles_at_distance(r))
+    }
+
 
     (num_odd, num_even, overlap_points)
 }
@@ -523,7 +603,7 @@ fn main() -> Result<()> {
     let mut num_reachable = 0;
 
     let (num_odd_tiles, num_even_tiles, boundary_points) =
-        count_num_lattice_points(radius_tiles - 0.5);
+        count_num_lattice_points_manhattan(radius_tiles - 0.5);
     // println!("Boundary points: {:?}", boundary_points);
     println!(
         "smart. r: {}, odd/even/tot: {}, {}, {}. Boundary length: {}", //; dumb: {}, {}, {}.",
@@ -556,11 +636,8 @@ fn main() -> Result<()> {
             continue;
         }
         let distance_remaining = num_steps - d;
-        // println!(
-        //     "Corner: {:?}, corner_mod: {:?}, distance_remaining: {}",
-        //     corner, corner_mod, distance_remaining
-        // );
-        num_reachable += *distance_cache
+        let tile_distnace = tile.x.abs() + tile.y.abs();
+        let num_reachable_from_tile = *distance_cache
             .entry((corner_mod, distance_remaining))
             .or_insert_with(|| {
                 num_reachable_from(
@@ -570,6 +647,12 @@ fn main() -> Result<()> {
                     &table_mat,
                 )
             });
+        num_reachable += num_reachable_from_tile;
+
+        // println!(
+        //     "tile: {:?}, distance: {}, num: {}, distance_remaining: {}",
+        //     tile, tile_distnace, num_reachable_from_tile, distance_remaining
+        // );
     }
     println!("Num steps: {}, Num reachable: {}", num_steps, num_reachable);
     // print_reachable(Pos { x: 65, y: 65 }, 0, &corner_to_distances, &table_mat);
@@ -577,61 +660,11 @@ fn main() -> Result<()> {
     // print_reachable(Pos { x: 65, y: 65 }, 2, &corner_to_distances, &table_mat);
 
     Ok(())
-    // Next up, we need to compute the cost of going one up/down based on neighbors.
-    // Then use that to verify hypothesis
-
-    // Actually an interesting observation: In both the input and example, there is a
-    // border of dots around the edge. This might be only straight line of dots.
-    // Thus to get anywhere, we always need to use this 'highway'
-    // We can use this to compute the distance between any two points
-    // We just computer the distances to all the border points for the two points, then
-    // compute the distance between the border points, and take the minimum.
-    // This is much faster, because the distance to each of the border points is always
-    // the same, so we can just make a LOT
-
-    // Let's first check the border hypothesis
-
-    // No, but in some sense it's easier. There are empty rows on i=0,65,130 and empty
-    // cols on the smae indices. Crucially the starting position is at (65,65). Thus to
-    // get to any point we can get there either from the starting 'cross' or from the
-    // border around the outside.
-
-    // The look-up table thing is also no dice, because it would contain >1 million
-    // entries per quadrant. But I suppose it is enough actually to just know the
-    // distance to all the points in the quadrant from each of the four corners of the
-    // quadrant. Nice thing is that we even start of at a corner!
-
-    // So we start with making a function that starts with a point, and then creates a
-    // table with distances to all the points in the table from there. Then we create a
-    // list of corners (0,0), (0,65), (0,130), (65,0), (65,65), (65,130), (130,0),
-    // (130,65), (130,130) each with their own LOT, this will have  135,200 entries; a
-    // lot, but much less at least.
-
-    // ----
-    // Next: We have to test this function 'compute distance' and compare it to existing
-    // things. Just discover points distance wise and check if the function returns
-    // true.
-    // (DONE)
-    //
-    // After that we have to check what the maximum value of the distances is, that way
-    // We can for each square immediately tell if it is reached within the specified
-    // number of steps or not. Probably all the ones in a specific radius are. Then we
-    // just have a thin circle where we need to check. Let's estimate:
-    //
-    // The circle has radius 202300 squares,  which means roughly 1,271,088 squares in
-    // the circle (or twice as much perhaps), then for each we need to do 131*131 look
-    // ups resulting in a total of around 21,813,147,820 lookups. I'm not sure that's
-    // computationally feasible, actually. But we can do a lot of caching; We just need
-    // to compute the number of squares that are reachable. This is always going to be
-    // the same, depending on which corner is closest to the starting point.
-    //
-    // Yes, largest distance is 261 for corners, 131 for middle and 196 for sides.
-    // We also need to determine if a square is 'odd' or 'even', and we need to determine
-    // The number of odd and even squares without rocks
-    //
-    // So really we just need to compute for each square, which corner is closest to starting point,
-    // And then look up how many points fit within a certain range of distances.
-    // We can just cache that result, and put it in a hash table.
-    //
-    // Of course we need to keep into account whether or not the number is odd or even!
+    // We're almost there. We just need to figure out why I need to set the
+    // boundary_width so high. It really should be 1.0, or 2.0 TOPS. Yet, I'm not
+    // getting the right answers otherwise. Why is that? Am I not counting the odd/even
+    // squares in the right way? Am I missing out on entire tiles? Like what is the
+    // problem. We can start out by again printing the number of tiles we found, but add
+    // a distance from start (in terms of entire tiles) to the print. We should also
+    // look for the correct answers how many tiles we actually 'skip' counting.
 }
