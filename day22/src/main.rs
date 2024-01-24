@@ -105,8 +105,28 @@ fn find_new_z(brick: &Brick, brick_map: &HashMap<Pos2, Vec<usize>>, bricks: &Vec
         .unwrap_or(1)
 }
 
+fn find_num_falling_bricks(
+    brick_index: usize,
+    supports: &Vec<HashSet<usize>>,
+    supported_by: &Vec<HashSet<usize>>,
+) -> usize {
+    let mut falling_bricks = HashSet::new();
+    falling_bricks.insert(brick_index);
+
+    let mut queue = vec![brick_index];
+    while let Some(i) = queue.pop() {
+        for j in &supports[i] {
+            if supported_by[*j].iter().all(|k| falling_bricks.contains(k)) {
+                falling_bricks.insert(*j);
+                queue.push(*j);
+            }
+        }
+    }
+    falling_bricks.len()-1
+}
+
 fn main() -> Result<()> {
-    let input = std::fs::read_to_string("day22/src/example.txt")?;
+    let input = std::fs::read_to_string("day22/src/input.txt")?;
     let mut bricks = Vec::new();
     let mut brick_map: HashMap<Pos2, Vec<usize>> = HashMap::new();
 
@@ -157,21 +177,24 @@ fn main() -> Result<()> {
 
     let mut num_will_fall = 0;
 
-    for (i, supported_inds) in supports.iter().enumerate() {
-        let num_fall = supported_inds
-            .iter()
-            .filter(|&j| supported_by[*j].len() == 1)
-            .count();
-        println!(
-            "Disentigrating {} will cause {} bricks to fall",
-            i, num_fall
-        );
-        // println!("Brick {} can be disentigrated", i);
-        num_will_fall += num_fall;
+    // for (i, supported_inds) in supports.iter().enumerate() {
+    //     let num_fall = supported_inds
+    //         .iter()
+    //         .filter(|&j| supported_by[*j].len() == 1)
+    //         .count();
+    //     println!(
+    //         "Disentigrating {} will cause {} bricks to fall",
+    //         i, num_fall
+    //     );
+    //     // println!("Brick {} can be disentigrated", i);
+    //     num_will_fall += num_fall;
+    // }
+    for i in 0..bricks.len() {
+        num_will_fall += find_num_falling_bricks(i, &supports, &supported_by);
     }
+
     // println!("Number of disentigratable bricks: {}", num_disentigratable);
     println!("Number of bricks that will fall: {}", num_will_fall);
-    
 
     Ok(())
 }
@@ -186,4 +209,8 @@ fn main() -> Result<()> {
 
 // For part two: we have to use the two 'supports' and 'supported_by' to recursively
 // Find the bricks that will fall. And this really can be recursive; we can use a hashmap
-// If a bricks falls, and it supports another brick uniquely, that one will also fall. 
+// If a bricks falls, and it supports another brick uniquely, that one will also fall.
+
+// No it's not recursive. But we start with a hashset of bricks that will fall. Then for
+// each brick on top of that one, we check if it's supported only by bricks in the set,
+// if so it also falls and is added to the set. We maintain a queue of bricks to check.
