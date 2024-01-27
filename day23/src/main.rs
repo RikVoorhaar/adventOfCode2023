@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -120,80 +122,127 @@ impl Tile {
             None
         }
     }
+
+    /// We need to have a second method that ignores the slope condition, because that's
+    /// needed when determining whether something is a fork
+    fn neighbors(&self, hiking_map: &[Vec<TileType>], check_slope: bool) -> Vec<Tile> {
+        let mut out = Vec::new();
+        if let Some(tile) = self.up(hiking_map) {
+            match tile.tile_type {
+                TileType::Forest => {}
+                TileType::SlopeDown => {
+                    if !check_slope {
+                        out.push(tile)
+                    }
+                }
+                _ => out.push(tile),
+            }
+        }
+        if let Some(tile) = self.down(hiking_map) {
+            match tile.tile_type {
+                TileType::Forest => {}
+                TileType::SlopeUp => {
+                    if !check_slope {
+                        out.push(tile)
+                    }
+                }
+                _ => out.push(tile),
+            }
+        }
+        if let Some(tile) = self.left(hiking_map) {
+            match tile.tile_type {
+                TileType::Forest => {}
+                TileType::SlopeRight => {
+                    if !check_slope {
+                        out.push(tile)
+                    }
+                }
+                _ => out.push(tile),
+            }
+        }
+        if let Some(tile) = self.right(hiking_map) {
+            match tile.tile_type {
+                TileType::Forest => {}
+                TileType::SlopeLeft => {
+                    if !check_slope {
+                        out.push(tile)
+                    }
+                }
+                _ => out.push(tile),
+            }
+        }
+
+        out
+    }
+
+    fn is_fork(&self, hiking_map: &[Vec<TileType>]) -> bool {
+        self.neighbors(hiking_map, false).len() > 2
+            || self.tile_type == TileType::Start
+            || self.tile_type == TileType::Exit
+    }
 }
 
-/// Find all the nodes that can be reached from a tile
-/// The starting tile must be a path tile
-/// TODO: This is great, but we also need to find the distance. For this I think we can
-/// assume that there are no loops in any of the paths, so that the shortest and longest
-/// non-intersecting paths are always the same. I hope that's the case.
+/// Finds distances to all forks reachable from this tile.
+/// The input tile must be a fork itself
 fn find_nodes(input_tile: Tile, hiking_map: &[Vec<TileType>]) -> Vec<(Tile, usize)> {
-    let next_tile = match input_tile.tile_type {
-        TileType::Start => input_tile.down(hiking_map),
-        TileType::Exit => input_tile.up(hiking_map),
-        TileType::SlopeDown => input_tile.down(hiking_map),
-        TileType::SlopeUp => input_tile.up(hiking_map),
-        TileType::SlopeLeft => input_tile.left(hiking_map),
-        TileType::SlopeRight => input_tile.right(hiking_map),
-        _ => return Vec::new(),
-    };
-    if next_tile.is_none() {
-        return Vec::new();
-    }
-    let next_tile = next_tile.unwrap();
-    if next_tile.tile_type != TileType::Path {
-        return vec![(next_tile, 1)];
-    }
     let mut out = Vec::new();
     let mut checked = HashSet::new();
     checked.insert(input_tile.clone());
-    checked.insert(next_tile.clone());
-    let mut queue = vec![(next_tile, 1)];
+
+    let mut queue = input_tile
+        .neighbors(hiking_map, false)
+        .into_iter()
+        .map(|t| (t, 1))
+        .collect::<Vec<(Tile, usize)>>();
 
     while let Some((tile, d)) = queue.pop() {
-        if let Some(up) = tile.up(hiking_map) {
-            if checked.insert(up.clone()) {
-                match up.tile_type {
-                    TileType::SlopeDown | TileType::Forest => {}
-                    TileType::Path => queue.push((up, d + 1)),
-                    _ => out.push((up, d + 1)),
-                }
-            }
+        if !checked.insert(tile.clone()) {
+            continue;
         }
-        if let Some(down) = tile.down(hiking_map) {
-            if checked.insert(down.clone()) {
-                match down.tile_type {
-                    TileType::SlopeUp | TileType::Forest => {}
-                    TileType::Path => queue.push((down, d + 1)),
-                    _ => out.push((down, d + 1)),
-                }
-            }
-        }
-        if let Some(left) = tile.left(hiking_map) {
-            if checked.insert(left.clone()) {
-                match left.tile_type {
-                    TileType::SlopeRight | TileType::Forest => {}
-                    TileType::Path => queue.push((left, d + 1)),
-                    _ => out.push((left, d + 1)),
-                }
-            }
-        }
-        if let Some(right) = tile.right(hiking_map) {
-            if checked.insert(right.clone()) {
-                match right.tile_type {
-                    TileType::SlopeLeft | TileType::Forest => {}
-                    TileType::Path => queue.push((right, d + 1)),
-                    _ => out.push((right, d + 1)),
-                }
-            }
+
+        if tile.is_fork(hiking_map) {
+            out.push((tile, d));
+        } else {
+            queue.extend(
+                tile.neighbors(hiking_map, false)
+                    .into_iter()
+                    .map(|t| (t, d + 1)),
+            )
         }
     }
 
     out
 }
 
+
+#[derive(Clone, Debug)]
+struct Trail {
+    head: Tile,
+    visited: HashSet<Tile>,
+    length: usize,
+}
+
+impl Trail {
+    fn next_trails(&self, graph: &HashMap<Tile, Vec<(Tile, usize)>>) -> Vec<Self> {
+        let mut out = Vec::new();
+        for (tile, d) in &graph[&self.head] {
+            if self.visited.contains(tile) {
+                continue;
+            }
+            let mut new_visited = self.visited.clone();
+            new_visited.insert(tile.clone());
+            out.push(Self {
+                head: tile.clone(),
+                visited: new_visited,
+                length: self.length + d,
+            });
+        }
+        out
+    }
+}
+
 fn main() -> Result<()> {
-    let input = std::fs::read_to_string("day23/src/example.txt")?;
+    let input = std::fs::read_to_string("day23/src/input.txt")?;
     let mut hiking_map = input
         .lines()
         .map(|line| line.chars().map(TileType::from_char).collect::<Vec<_>>())
@@ -205,8 +254,8 @@ fn main() -> Result<()> {
     hiking_map[0][1] = TileType::Start;
     hiking_map[num_rows - 1][num_cols - 2] = TileType::Exit;
 
-    // let connected_to_start = find_nodes(start_tile, &hiking_map);
-    let mut queue = vec![start_tile];
+    // Create the graph
+    let mut queue = vec![start_tile.clone()];
     let mut graph = HashMap::new();
     while let Some(tile) = queue.pop() {
         if graph.contains_key(&tile) {
@@ -219,8 +268,22 @@ fn main() -> Result<()> {
         }
         graph.insert(tile, edges);
     }
-    // Next is just finding the longest acyclic path in a directed graph. It is not a
-    // directed _acyclic_ graph, so this problem isn't trivial.
+
+    // Find longest path
+    let mut queue = vec![Trail {
+        head: start_tile,
+        visited: HashSet::new(),
+        length: 0,
+    }];
+    let mut longest_trail = 0;
+    while let Some(trail) = queue.pop() {
+        if trail.head.tile_type == TileType::Exit && trail.length > longest_trail {
+            println!("Found new longest trail: {:?}", trail);
+            longest_trail = trail.length;
+        }
+
+        queue.extend(trail.next_trails(&graph));
+    }
 
     Ok(())
 }
