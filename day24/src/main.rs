@@ -106,3 +106,70 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+// Now for the problem of the 3d hailstones in part2.
+// This is basically an interger programming problem. we have a series of equations
+// x[i,j] + v[i,j] * t = y[j] + w[j] * t
+// Which we need to solve for y and w and t
+// In the end we can put all of this in one big matrix, and just do Guassian elimination
+// I suppose. It is rather surprising that a solution exists at all.
+
+// Well the above is not quite true, since the equation isn't linear. But the existence
+// of a solution (in t) to the equation x[i] + v[i]*t = y + w * t puts a constraint on y
+//  and w in terms of x[i] and v[i]. We need to figure out what that constraint is. One
+// way to phrase it is that (x[i]-y) and (v[i]-w) are parallel, which means their cross
+// product is zero. Unfortunately that's not a linear equation in (y,w), because it
+// containes products of y and w.
+// Nevertheless we can expand the cross product, because it is distributive
+// 0 = x[i] X v[i] - x[i] X w - y X v[i] + y X w
+
+// Yeah, that's not very useful, because it's not linear.
+// But maybe we can see it as an optimization problem. The norm of this cross product
+// could be a loss function. As long as its derivative is easy to compute we can just
+// use gradient descent or something like that.
+
+// There is Lagrange's identity which might help us out. It states that
+// \|a\cross b\|^2 = \|a\|^2 \|b\|^2 - (a\cdot b)^2
+// with in our case a = (x[i]-y) and b = (v[i]-w)
+// That's not a verry pretty function to differentiate, but it's not impossible
+//
+// The gradient should be, w.r.t. y:
+// 2(x-y)\|v-w\|^2-(v-w)
+//
+// w.r.t. w:
+// 2(v-w)\|x-y\|^2-(x-y)
+
+// That's non-linear but not hard to implement. To start we need a vect3 struct which
+// implements: dot-product, norm^2, cross product.
+// Then we need to gather these vectors from the input, define the loss function
+// and get cracking. First of course confirm the gradient with finite differences.
+
+struct Vect3 {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+impl Debug for Vect3 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({:.2}, {:.2}, {:.2})", self.x, self.y, self.z)
+    }
+}
+
+impl Vect3 {
+    fn dot(&self, other: &Self) -> f64 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    fn norm2(&self) -> f64 {
+        self.dot(self)
+    }
+
+    fn cross(&self, other: &Self) -> Self {
+        Self {
+            x: self.y * other.z - self.z * other.y,
+            y: self.z * other.x - self.x * other.z,
+            z: self.x * other.y - self.y * other.x,
+        }
+    }
+}
