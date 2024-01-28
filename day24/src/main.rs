@@ -201,7 +201,6 @@ fn part1(hailstones: Vec<Hailstone2>, min_pos: i64, max_pos: i64) -> usize {
     num_intersect
 }
 
-
 fn full_loss_grad(y: Vect3, w: Vect3, hailstones: &Vec<(Vect3, Vect3)>) -> (f64, Vect3, Vect3) {
     let mut l = 0.0;
     let mut y_grad = Vect3::zero();
@@ -295,7 +294,7 @@ fn fin_diff_grad(x: Vect3, v: Vect3, y: Vect3, w: Vect3, eps: f64) -> (Vect3, Ve
 }
 
 fn main() -> Result<()> {
-    let input = std::fs::read_to_string("day24/src/example.txt")?;
+    let input = std::fs::read_to_string("day24/src/input.txt")?;
     let hailstones = input
         .lines()
         .map(|l| Hailstone3::from_str(l).to_vect3())
@@ -321,30 +320,45 @@ fn main() -> Result<()> {
 
     //
 
-    let mut step_size = 1.0;
-    for _ in 0..100 {
-        let (l, grad_y, grad_w) = full_loss_grad(y, w, &hailstones);
+    let mut step_size_y = 1.0;
+    let mut step_size_w = 1.0;
+    for _ in 0..1000 {
+        let (l, grad_y, _) = full_loss_grad(y, w, &hailstones);
         let search_y = grad_y * (1.0 / grad_y.norm2().sqrt());
-        let search_w = grad_w * (1.0 / grad_w.norm2().sqrt());
-        let grad_dot_search = grad_y.dot(&search_y) + grad_w.dot(&search_w);
-
-        step_size = armijo_step_size(
+        let grad_dot_search_y = grad_y.dot(&search_y);
+        step_size_y = armijo_step_size(
             l,
-            step_size,
+            step_size_y,
             y,
             w,
             search_y,
-            search_w,
-            grad_dot_search,
+            Vect3::zero(),
+            grad_dot_search_y,
             &hailstones,
         );
-        y += -step_size * search_y;
-        w += -step_size * search_w;
+        y += -step_size_y * search_y;
+
+        let (l, _, grad_w) = full_loss_grad(y, w, &hailstones);
+        let search_w = grad_w * (1.0 / grad_w.norm2().sqrt());
+        let grad_dot_search_w = grad_w.dot(&search_w);
+
+        step_size_w = armijo_step_size(
+            l,
+            step_size_w,
+            y,
+            w,
+            Vect3::zero(),
+            search_w,
+            grad_dot_search_w,
+            &hailstones,
+        );
+        w += -step_size_w * search_w;
         let sum = y.x + y.y + y.z;
         println!(
-            "l = {:.2e}, step_size= {:.2e}, y_grad_norm = {:.2e}, w_grad_norm = {:.2e}, y = {:?}, w = {:?}, sum: {}",
+            "l = {:.2e}, step_size_y= {:.2e}, step_size_w= {:.2e}, y_grad_norm = {:.2e}, w_grad_norm = {:.2e}, y = {:?}, w = {:?}, sum: {}",
             l,
-            step_size,
+            step_size_y,
+            step_size_w,
             grad_y.norm2(),
             grad_w.norm2(),
             y,
