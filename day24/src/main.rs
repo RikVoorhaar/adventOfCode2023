@@ -4,6 +4,9 @@ use std::{
     fmt::Debug,
 };
 
+mod vect3;
+use vect3::Vect3;
+
 use anyhow::Result;
 
 struct Hailstone3 {
@@ -36,6 +39,21 @@ impl Hailstone3 {
             position: (self.position.0, self.position.1),
             velocity: (self.velocity.0, self.velocity.1),
         }
+    }
+
+    fn to_vect3(&self) -> (Vect3, Vect3) {
+        (
+            Vect3 {
+                x: self.position.0 as f64,
+                y: self.position.1 as f64,
+                z: self.position.2 as f64,
+            },
+            Vect3 {
+                x: self.velocity.0 as f64,
+                y: self.velocity.1 as f64,
+                z: self.velocity.2 as f64,
+            },
+        )
     }
 }
 
@@ -82,31 +100,6 @@ fn intersection_point(stone1: &Hailstone2, stone2: &Hailstone2) -> Option<(f64, 
     Some((x, y))
 }
 
-fn main() -> Result<()> {
-    let input = std::fs::read_to_string("day24/src/input.txt")?;
-    let hailstones = input
-        .lines()
-        .map(|l| Hailstone3::from_str(l).project())
-        .collect::<Vec<_>>();
-    println!("{:?}", hailstones);
-
-    // let (min_pos, max_pos) = (7.0, 27.0);
-    let (min_pos, max_pos) = (200000000000000.0, 400000000000000.0);
-    let mut num_intersect = 0;
-    for (i, hailstone) in hailstones.iter().enumerate() {
-        for other in &hailstones[i + 1..] {
-            if let Some((x, y)) = intersection_point(hailstone, other) {
-                if x >= min_pos && x <= max_pos && y >= min_pos && y <= max_pos {
-                    num_intersect += 1;
-                }
-            }
-        }
-    }
-    println!("num_intersect = {}", num_intersect);
-
-    Ok(())
-}
-
 // Now for the problem of the 3d hailstones in part2.
 // This is basically an interger programming problem. we have a series of equations
 // x[i,j] + v[i,j] * t = y[j] + w[j] * t
@@ -140,36 +133,208 @@ fn main() -> Result<()> {
 // 2(v-w)\|x-y\|^2-(x-y)
 
 // That's non-linear but not hard to implement. To start we need a vect3 struct which
-// implements: dot-product, norm^2, cross product.
-// Then we need to gather these vectors from the input, define the loss function
-// and get cracking. First of course confirm the gradient with finite differences.
+// implements: dot-product, norm^2, cross product. Then we need to gather these vectors
+// from the input, define the loss function and get cracking. First of course confirm
+// the gradient with finite differences.
+//
+// I guess it works? I havent' verified yet with finite differences, but at least it
+// seems to find a descent direction. I do need to implement line search though, because
+// fixed step size isn't working.
 
-struct Vect3 {
-    x: f64,
-    y: f64,
-    z: f64,
+// Ok, so the problem is not well-conditioned, and the linear approach simply doesn't
+// work. We can try ALS; I suspect that if we keep y or w fixed that the problem becomes
+// linear.
+
+fn loss(x: Vect3, v: Vect3, y: Vect3, w: Vect3) -> f64 {
+    let cross = (x - y).cross(&(v - w));
+    cross.norm2()
 }
 
-impl Debug for Vect3 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({:.2}, {:.2}, {:.2})", self.x, self.y, self.z)
-    }
+/// \|a\cross b\|^2 = \|a\|^2 \|b\|^2 - (a\cdot b)^2
+fn loss2(x: Vect3, v: Vect3, y: Vect3, w: Vect3) -> f64 {
+    let a = x - y;
+    let b = v - w;
+    let a_dot_b = a.dot(&b);
+    let a_norm2 = a.norm2();
+    let b_norm2 = b.norm2();
+    a_norm2 * b_norm2 - a_dot_b * a_dot_b
+}
+fn grad(x: Vect3, v: Vect3, y: Vect3, w: Vect3) -> (Vect3, Vect3) {
+    let a = x - y;
+    let b = v - w;
+    let a_dot_b = a.dot(&b);
+    let a_norm2 = a.norm2();
+    let b_norm2 = b.norm2();
+
+    let grad_y = 2.0 * b_norm2 * a - 2.0 * a_dot_b * b;
+    let grad_w = 2.0 * a_norm2 * b - 2.0 * a_dot_b * a;
+
+    (-grad_y, -grad_w)
 }
 
-impl Vect3 {
-    fn dot(&self, other: &Self) -> f64 {
-        self.x * other.x + self.y * other.y + self.z * other.z
-    }
+fn grad_old(x: Vect3, v: Vect3, y: Vect3, w: Vect3) -> (Vect3, Vect3) {
+    // let cross = (x - y).cross(&(v - w));
+    println!("v-w = {:?}", v - w);
+    println!("x-y = {:?}", x - y);
+    let grad_y = 2.0 * (x - y) * (v - w).norm2() - (v - w);
+    let grad_w = 2.0 * (v - w) * (x - y).norm2() - (x - y);
+    (grad_y, grad_w)
+}
 
-    fn norm2(&self) -> f64 {
-        self.dot(self)
-    }
-
-    fn cross(&self, other: &Self) -> Self {
-        Self {
-            x: self.y * other.z - self.z * other.y,
-            y: self.z * other.x - self.x * other.z,
-            z: self.x * other.y - self.y * other.x,
+fn part1(hailstones: Vec<Hailstone2>, min_pos: i64, max_pos: i64) -> usize {
+    let mut num_intersect = 0;
+    for (i, hailstone) in hailstones.iter().enumerate() {
+        for other in &hailstones[i + 1..] {
+            if let Some((x, y)) = intersection_point(hailstone, other) {
+                if x >= min_pos as f64
+                    && x <= max_pos as f64
+                    && y >= min_pos as f64
+                    && y <= max_pos as f64
+                {
+                    num_intersect += 1;
+                }
+            }
         }
     }
+    num_intersect
+}
+
+fn full_loss_grad(y: Vect3, w: Vect3, hailstones: &Vec<(Vect3, Vect3)>) -> (f64, Vect3, Vect3) {
+    let mut l = 0.0;
+    let mut y_grad = Vect3::zero();
+    let mut w_grad = Vect3::zero();
+
+    for &(x, v) in hailstones {
+        l += loss(x, v, y, w);
+        let (y_grad_, w_grad_) = grad(x, v, y, w);
+        y_grad += y_grad_;
+        w_grad += w_grad_;
+    }
+
+    (
+        l * SCALE_FACTOR,
+        y_grad * SCALE_FACTOR,
+        w_grad * SCALE_FACTOR,
+    )
+}
+
+static SCALE_FACTOR: f64 = 1e-24;
+
+fn full_loss(y: Vect3, w: Vect3, hailstones: &Vec<(Vect3, Vect3)>) -> f64 {
+    let mut l = 0.0;
+
+    for &(x, v) in hailstones {
+        l += loss(x, v, y, w);
+    }
+
+    l * SCALE_FACTOR
+}
+
+fn armijo_condition(
+    f_old: f64,
+    f_new: f64,
+    armijo_constant: f64,
+    grad_norm2: f64,
+    step_size: f64,
+) -> bool {
+    f_new <= f_old - step_size * armijo_constant * grad_norm2
+}
+
+fn armijo_step_size(
+    loss_prev: f64,
+    stepsize_prev: f64,
+    y: Vect3,
+    w: Vect3,
+    grad_y: Vect3,
+    grad_w: Vect3,
+    hailstones: &Vec<(Vect3, Vect3)>,
+) -> f64 {
+    let mut stepsize = stepsize_prev * 2.0;
+    let grad_norm2 = grad_y.norm2() + grad_w.norm2();
+
+    while !armijo_condition(
+        loss_prev,
+        full_loss(y - stepsize * grad_y, w - stepsize * grad_w, &hailstones),
+        0.99,
+        grad_norm2,
+        stepsize,
+    ) {
+        stepsize /= 1.5;
+    }
+    stepsize
+}
+
+/// Compute the gradient of the loss function using finite differences
+fn fin_diff_grad(x: Vect3, v: Vect3, y: Vect3, w: Vect3, eps: f64) -> (Vect3, Vect3) {
+    let mut y_grad_fin = Vect3::zero();
+    let mut w_grad_fin = Vect3::zero();
+    let l = loss(x, v, y, w);
+
+    for i in 0..6 {
+        let mut y_eps = y;
+        let mut w_eps = w;
+        if i < 3 {
+            y_eps[i] += eps;
+        } else {
+            w_eps[i - 3] += eps;
+        }
+        let l_eps = loss(x, v, y_eps, w_eps);
+        if i < 3 {
+            y_grad_fin[i] = (l_eps - l) / eps;
+        } else {
+            w_grad_fin[i - 3] = (l_eps - l) / eps;
+        }
+    }
+
+    (y_grad_fin, w_grad_fin)
+}
+
+fn main() -> Result<()> {
+    let input = std::fs::read_to_string("day24/src/input.txt")?;
+    let hailstones = input
+        .lines()
+        .map(|l| Hailstone3::from_str(l).to_vect3())
+        .collect::<Vec<_>>();
+    println!("{:?}", hailstones);
+
+    let mut y = Vect3::zero();
+    let mut w = Vect3::zero();
+
+    let (x, v) = hailstones[0];
+    let l = loss(x, v, y, w);
+    let l2 = loss2(x, v, y, w);
+    let (y_grad, w_grad) = grad(x, v, y, w);
+    // let (y_grad2, w_grad2) = grad2(x, v, y0, w0);
+    let (y_grad_fin, w_grad_fin) = fin_diff_grad(x, v, y, w, 1e-4);
+    println!("l = {:.2e}", l);
+    println!("l2-l = {:.2e}", l2 - l);
+    println!("y_grad = {:?}", y_grad);
+    // println!("y_grad2 = {:?}", y_grad2);
+    println!("y_grad_fin = {:?}", y_grad_fin);
+    println!("w_grad = {:?}", w_grad);
+    // println!("w_grad2 = {:?}", w_grad2);
+
+    println!("w_grad_fin = {:?}", w_grad_fin);
+
+    //
+    let mut step_size = 1.0;
+    for _ in 0..10000 {
+        let (l, y_grad, w_grad) = full_loss_grad(y, w, &hailstones);
+        step_size = armijo_step_size(l, step_size, y, w, y_grad, w_grad, &hailstones);
+        y += -step_size * y_grad;
+        w += -step_size * w_grad;
+        let sum = y.x + y.y + y.z;
+        println!(
+            "l = {:.2e}, step_size= {:.2e}, y_grad_norm = {:.2e}, w_grad_norm = {:.2e}, y = {:?}, w = {:?}, sum: {}",
+            l,
+            step_size,
+            y_grad.norm2(),
+            w_grad.norm2(),
+            y,
+            w,
+            sum
+        );
+    }
+
+    Ok(())
 }
