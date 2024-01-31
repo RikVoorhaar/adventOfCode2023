@@ -161,6 +161,60 @@ fn force_remove_random_edge(forbidden_edges: &mut HashSet<(usize, usize)>) {
     forbidden_edges.remove(&edge);
 }
 
+fn compute_distances(graph: &HashMap<usize, Vec<usize>>, node: usize) -> Vec<usize> {
+    let mut distances = vec![usize::MAX; graph.len()];
+    let mut queue = vec![(node, 0)];
+    while let Some((node, dist)) = queue.pop() {
+        if dist >= distances[node] {
+            continue;
+        }
+        distances[node] = dist;
+        for target in graph.get(&node).unwrap() {
+            queue.push((*target, dist + 1));
+        }
+    }
+    distances
+}
+fn floyd_warshall(graph: &HashMap<usize, Vec<usize>>) -> Vec<Vec<usize>> {
+    let n = graph.len();
+    let mut distances = vec![vec![usize::MAX; n]; n];
+
+    for i in 0..n {
+        distances[i][i] = 0;
+    }
+
+    for (&node, targets) in graph {
+        for &target in targets {
+            distances[node][target] = 1;
+        }
+    }
+
+    for k in 0..n {
+        println!("Progress: {}/{}", k, n);
+        for i in 0..n {
+            for j in 0..n {
+                if distances[i][k] != usize::MAX && distances[k][j] != usize::MAX {
+                    distances[i][j] = distances[i][j].min(distances[i][k] + distances[k][j]);
+                }
+            }
+        }
+    }
+
+    distances
+}
+
+fn compute_distance_matrix(graph: &HashMap<usize, Vec<usize>>) -> Vec<Vec<usize>> {
+    let mut distances = vec![vec![usize::MAX; graph.len()]; graph.len()];
+    for (i, node) in graph.keys().enumerate() {
+        let node_distances = compute_distances(graph, *node);
+        println!("Progress: {}/{}", i, graph.len());
+        for (target, dist) in node_distances.iter().enumerate() {
+            distances[*node][target] = *dist;
+        }
+    }
+    distances
+}
+
 fn main() -> Result<()> {
     let input = std::fs::read_to_string("day25/src/input.txt")?;
 
@@ -209,51 +263,21 @@ fn main() -> Result<()> {
         })
         .collect();
     let edges = edges_set.into_iter().collect::<Vec<_>>();
+    println!("edges: {}", edges.len());
 
-    let mut forbidden_edges = cut_edges_until_disconnected(forbidden_edges, &edges, &graph);
-
-    while forbidden_edges.len() > 3 {
-        let mut num_removed = 0;
-        while let Some(new_forbidden_edges) =
-            try_remove_random_edge(forbidden_edges.clone(), &graph)
-        {
-            num_removed += 1;
-            forbidden_edges = new_forbidden_edges;
-        }
-        if num_removed == 0 {
-            force_remove_random_edge(&mut forbidden_edges);
-        } else {
-            println!(
-                "graph is disconnected after removing: {:?}",
-                forbidden_edges
-            );
-            if forbidden_edges.len() == 3 {
-                println!("found a 3-cut: {:?}", forbidden_edges);
-                println!("it has size: {}", is_connected(&graph, &forbidden_edges));
-                break;
-            }
-        }
-        forbidden_edges = cut_edges_until_disconnected(forbidden_edges, &edges, &graph)
+    // Print the bins of degrees
+    let mut degrees: HashMap<usize, usize> = HashMap::new();
+    for (node, targets) in graph.iter() {
+        degrees
+            .entry(targets.len())
+            .and_modify(|v| *v += 1)
+            .or_insert(1);
     }
-
-    // edges contians
-
-    // let dual_graph = dual_graph(&graph, &edges);
-    // let num_edges_in_dual = dual_graph.values().map(|v| v.len()).sum::<usize>() / 2;
-    // println!("num edges in dual graph: {}", num_edges_in_dual);
-    // println!("num nodes in dual graph: {}", dual_graph.len());
-
-    // let ranks = page_rank(&dual_graph, 0.99, 1_00);
-    // // Page rank is not good enough as centrality measure, I think
-    // // Perhaps we need a different approach altogether
-    // for (i, rank) in ranks.iter().enumerate() {
-    //     let (node1, node2) = edges[i];
-    //     let name1 = nodes[node1];
-    //     let name2 = nodes[node2];
-    //     println!("({}, {}): {}", name1, name2, rank);
-    // }
-
-    // println!("ranks: {:?}", ranks);
+    println!("degrees: {:?}", degrees);
 
     Ok(())
 }
+// So we betweennes centraility would be an excellent thing to use, but it's too expensive. 
+// We can approximate it by just sampling some random points, and computing shortest
+// distances to all other nodes, and just noting down the edges that we see that way.
+// Do that for 100 vertices and it might be enough of a centrality measure. 
